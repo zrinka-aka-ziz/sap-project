@@ -1,0 +1,651 @@
+---
+title: "Goodreads (SAPunica)"
+output:
+  pdf_document: default
+  html_document: default
+date: "2023-01-15"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Radimo sa skupom podataka o knjigama na stranici goodreads.com
+
+Za početak pogledajmo kako izgleda skup podataka:
+
+```{r}
+library(readr)
+goodreads_dataset = read_csv("Goodreads-dataset-sanitized-arr.csv")
+head(goodreads_dataset)
+```
+
+```{r}
+dim(goodreads_dataset)
+```
+
+Skup podataka sastoji se od 52478 primjerka, s po 17 atributa.
+Atributi su sljedeći:
+
+```{r}
+summary(goodreads_dataset)
+```
+
+U skupu podataka nalaze se i neke nedostajuće vrijednosti:
+```{r}
+sum(is.na(goodreads_dataset))
+```
+
+## Usporedba ocjena po žanrovima
+
+Usporedimo prosječnu ocjenu za žanr fikcije u usporedbi s publicistikom
+```{r}
+fiction = goodreads_dataset[goodreads_dataset$genre1 == "Fiction",]
+nonfiction = goodreads_dataset[goodreads_dataset$genre1 == "Nonfiction",]
+cat("Means by genre:","\n")
+cat("Fiction:",mean(fiction$rating), "\n")
+cat("Non-fiction:",mean(nonfiction$rating))
+```
+
+Srednje vrijednosti se razlikuju, ali još trebamo utvrditi je li ova razlika statistički značajna.
+
+Pogledajmo histograme ocjena:
+```{r}
+hist(fiction$rating, breaks=50, xlim = c(1,5))
+abline(v=mean(fiction$rating, na.rm = TRUE), col="red", lwd=2)
+hist(nonfiction$rating, breaks=50, xlim = c(1,5))
+abline(v=mean(nonfiction$rating, na.rm = TRUE), col="red", lwd=2)
+```
+
+Prije provođenja T-testa, trebamo odrediti jesu li varijance jednake:
+```{r}
+var.test(fiction$rating, nonfiction$rating)
+```
+
+Varijance ova dva uzorka očito se značajno razlikuju, stoga će se u T-testu morati krenuti s pretpostavkom da su varijance te dvije populacije različite.
+
+Također, iako T-test pretpostavlja da se podatci ravnaju po normalnoj razdiobi, daje dobre rezultate i kada razdioba podataka ponešto odstupa od normalne. Stoga, za ovu svrhu nećemo testirati normalnost podataka.
+
+Radimo T-test:
+
+```{r}
+t.test(fiction$rating, nonfiction$rating, alternative = "less", var.equal = FALSE)
+```
+
+Očito je da je prosječna ocjena knjiga iz fikcije značajno manja od dokumentarne literature
+
+
+
+Pogledajmo usporedbu po drugoj kategoriji žanrova, izdvojimo Young Adult knjige i usporedimo ih s ostalim knjigama:
+```{r}
+YA = goodreads_dataset[goodreads_dataset$genre2 == "Young Adult",]
+nonYA = goodreads_dataset[goodreads_dataset$genre2 != "Young Adult",]
+cat("Means by genre:","\n")
+cat("YA:",mean(YA$rating), "\n")
+cat("Non-YA:",mean(nonYA$rating))
+```
+
+Razlika u srednjim vrijednostima od oko 0.1 čini se dovoljnom za provedbu testa.
+
+```{r}
+hist(YA$rating, breaks=50, xlim = c(1,5))
+abline(v=mean(YA$rating, na.rm = TRUE), col="red", lwd=2)
+hist(nonYA$rating, breaks=50, xlim = c(1,5))
+abline(v=mean(nonYA$rating, na.rm = TRUE), col="red", lwd=2)
+```
+
+Prije provedbe T-testa potrebno je usporediti varijance:
+```{r}
+var.test(YA$rating, nonYA$rating)
+```
+
+Varijance ni u ova dva skupa nisu jednake, stoga to moramo navesti pri provedbi testa.
+
+Provedimo T-test:
+
+```{r}
+t.test(YA$rating, nonYA$rating, alternative = "less", var.equal = FALSE)
+```
+
+Test pokazuje da Young Adult knjige imaju značajno manju prosječnu ocjenu
+
+## Usporedba ovisnosti broja stranica i cijene
+
+Čini se sasvim očito pretpostaviti da knjige s više stranica koštaju više od knjiga s manje stranica. Provjerit ćemo postoji li statistički značajna ovisnost tih atributa, ili su te veličine neovisne.
+
+Za početak, podijelit ćemo knjige po broju stranica u dvije skupine, gdje je granica medijan:
+
+```{r}
+goodreads_copy = data.frame(goodreads_dataset)
+goodreads_copy = goodreads_copy[!is.na(goodreads_copy$pages),]
+goodreads_copy = data.frame(goodreads_copy[!is.na(goodreads_copy$price),])
+goodreads_copy_temp = data.frame(goodreads_copy)
+
+median_pages = median(goodreads_copy$pages, na.rm = TRUE)
+goodreads_copy$pages[goodreads_copy_temp$pages < median_pages] = "Small"
+goodreads_copy$pages[goodreads_copy_temp$pages >= median_pages] = "Big"
+tbl = table(goodreads_copy$pages)
+tbl
+```
+
+Također, podijelit ćemo knjige po cijeni u dvije skupine, gdje je granica također medijan:
+
+```{r}
+median_price = median(goodreads_copy$price, na.rm = TRUE)
+goodreads_copy$price[goodreads_copy_temp$price <= median_price] = "Cheap"
+goodreads_copy$price[goodreads_copy_temp$price > median_price] = "Expensive"
+tbl = table(goodreads_copy$price)
+tbl
+```
+
+Napravimo kontingencijsku tablicu:
+```{r}
+tbl = table(goodreads_copy$pages, goodreads_copy$price)
+tbl_w_margins = addmargins(tbl)
+tbl_w_margins
+```
+
+Provedimo hi-kvadrat test neovisnosti:
+```{r}
+chisq.test(tbl, correct = F)
+```
+
+Očito cijena i broj stranica nisu neovisni, ali iz kontingencijske tablice vidimo da je zapravo više velikih knjiga s manjom cijenom i manjih knjiga s velikom cijenom u usporedbi s velikim knjigama s velikom cijenom i malim knjigama s malom cijenom
+
+S obzirom na to da se vrijednosti ovih atributa za većinu primjeraka nalazi vrlo blizu medijana, striktno dijeljenje po medijanu može dovesti do nepreciznih zaključaka, s obzirom na to da se primjerci zbog utjecaja šuma mogu vrlo lako naći na drugoj strani podjele. Stoga bi bilo korisno ispitati podjelu na način da ne dijelimo skup podataka po medijanu, već po nekim drugim kvantilima.
+
+Uzmimo podjelu na tercile:
+
+```{r}
+goodreads_copy = data.frame(goodreads_dataset)
+goodreads_copy = goodreads_copy[!is.na(goodreads_copy$pages),]
+goodreads_copy = data.frame(goodreads_copy[!is.na(goodreads_copy$price),])
+goodreads_copy_temp = data.frame(goodreads_copy)
+
+tertiles_size = quantile(goodreads_copy_temp$pages, probs=c(1/3,2/3), na.rm = TRUE)
+goodreads_copy$pages[goodreads_copy_temp$pages < tertiles_size[1]] = "1_Small"
+goodreads_copy$pages[goodreads_copy_temp$pages >= tertiles_size[1] & goodreads_copy_temp$pages < tertiles_size[2]] = "2_Medium_size"
+goodreads_copy$pages[goodreads_copy_temp$pages >= tertiles_size[2]] = "3_Big"
+tbl = table(goodreads_copy$pages)
+tbl
+```
+```{r}
+tertiles_price = quantile(goodreads_copy_temp$price, probs=c(1/3,2/3), na.rm = TRUE)
+goodreads_copy$price[goodreads_copy_temp$price < tertiles_price[1]] = "1_Cheap"
+goodreads_copy$price[goodreads_copy_temp$price >= tertiles_price[1] & goodreads_copy_temp$price < tertiles_price[2]] = "2_Medium_price"
+goodreads_copy$price[goodreads_copy_temp$price >= tertiles_price[2]] = "3_Expensive"
+tbl = table(goodreads_copy$price)
+tbl
+```
+
+```{r}
+tbl = table(goodreads_copy$pages, goodreads_copy$price)
+tbl_w_margins = addmargins(tbl)
+tbl_w_margins
+```
+```{r}
+chisq.test(tbl, correct = F)
+```
+
+Čak i u ovakvoj podjeli dobivamo zanemarivo malu P-vrijednost, što ponovno indicira ovisnost cijene o veličini knjige.
+
+
+## Razlika u popularnosti s obzirom na cijenu
+
+Popularnost ćemo definirati kao ukupan broj ocjena. Podijelimo ponovno skup podataka po cijeni na jeftinije i skuplje te pogledajmo razlikuju li se jeftinije i skuplje knjige po popularnosti:
+
+```{r}
+goodreads_copy = data.frame(goodreads_dataset)
+goodreads_copy = goodreads_copy[!is.na(goodreads_copy$price),]
+goodreads_copy = data.frame(goodreads_copy[!is.na(goodreads_copy$numRatings),])
+goodreads_copy_temp = data.frame(goodreads_copy)
+
+median_price = median(goodreads_copy$price, na.rm = TRUE)
+goodreads_copy$price[goodreads_copy_temp$price <= median_price] = "Cheap"
+goodreads_copy$price[goodreads_copy_temp$price > median_price] = "Expensive"
+tbl = table(goodreads_copy$price)
+tbl
+```
+
+Provjerimo kako izgledaju njihove srednje vrijednosti i medijani:
+
+```{r}
+print("Cheap:")
+cat("Mean - ", mean(goodreads_copy$numRatings[goodreads_copy$price == "Cheap"]), "\n")
+cat("Median - ",median(goodreads_copy$numRatings[goodreads_copy$price == "Cheap"]),"\n")
+print("Expensive:")
+cat("Mean - ",mean(goodreads_copy$numRatings[goodreads_copy$price == "Expensive"]),"\n")
+cat("Median - ",median(goodreads_copy$numRatings[goodreads_copy$price == "Expensive"]),"\n")
+```
+
+Naravno, prije testa jednakosti sredina moramo provjeriti varijance obje skupine:
+```{r}
+var.test(goodreads_copy$numRatings[goodreads_copy$price == "Cheap"], goodreads_copy$numRatings[goodreads_copy$price == "Expensive"])
+```
+
+Očito varijance nisu jednake pa moramo to naznačiti pri izvođenju T-testa.
+
+Provedimo prvo standardni T-test:
+```{r}
+t.test(goodreads_copy$numRatings[goodreads_copy$price == "Cheap"], goodreads_copy$numRatings[goodreads_copy$price == "Expensive"], alternative = "greater", var.equal = FALSE)
+```
+
+Zaključujemo da su jeftinije knjige popularnije.
+
+## Predviđanje nagrađivanosti
+
+Zanimljivo bi bilo promotriti može li se nagrađivanost knjige predvidjeti iz ostalih parametara.
+
+Za predviđanje nagrađivanosti koristit ćemo logističku regresiju, s obzirom na to da ćemo nagrađivanost knjige pretvoriti u binarnu varijablu.
+
+Kao regresore upotrijebit ćemo veći broj atributa koji bi mogli donijeti informaciju o nagrađivanosti, a nakon procjene parametara logističke regresije vidjet ćemo koji od atributa su najkorisniji za predviđanje.
+
+Atribute koji su kategoričke varijable prije procjene parametara logističke regresije treba pretvoriti u faktore, a potrebno je izbaciti i nedostajuće vrijednosti.
+```{r}
+library(dplyr)
+goodreads_copy = select(data.frame(goodreads_dataset),awards,rating,language,genre1,genre2,pages,numRatings,price,likedPercent)
+goodreads_copy = goodreads_copy[complete.cases(goodreads_copy),]
+print(length(goodreads_copy$awards))
+
+goodreads_copy$language = factor(goodreads_copy$language)
+goodreads_copy$genre1 = factor(goodreads_copy$genre1)
+goodreads_copy$genre2 = factor(goodreads_copy$genre2)
+```
+
+Sada možemo raditi logističku regresiju:
+```{r}
+logreg.mdl = glm(awards ~ rating + language + genre1 + genre2 + pages + numRatings + price + likedPercent, data=goodreads_copy, family = binomial())
+summary(logreg.mdl)
+```
+Vidimo zanimljive interpretacije rezultata:
+
+* Niti jedan jezik statistički značajno ne indicira dobivanje nagrade.
+* Ocjena (rating) značajno predviđa dobivanje nagrade i ta korelacija je negativna - veća ocjena daje manju vjerojatnost dobivanja nagrade
+* Također značajno, ali suprotno prethodnome, postotak sviđanja (likedPercent) ima pozitivnu korelaciju s dobivanjem nagrade
+* Cijena značajno predviđa nagrađivanost, i negativno su korelirani
+* S obzirom na žanrove, značajni pozitivni indikatori su ratne i povijesne knjige te memoari, dok su značajni negativni indikatori religija, romansa, triler, klasik i općenito publicistika
+* Broj stranica i broj ocjena značajno su pozitivno korelirani s dobivanjem nagrada
+
+
+```{r}
+Rsq = 1 - logreg.mdl$deviance/logreg.mdl$null.deviance
+Rsq
+```
+Model je vrlo dobro prilagođen podacima, s obzirom na relativno malenu vrijednost R^2. Ipak, provjerit ćemo i detaljno kako predviđa nagrađivanost:
+
+```{r}
+yHat <- logreg.mdl$fitted.values >= 0.5
+
+tab <- table(goodreads_copy$awards, yHat)
+
+tab
+```
+```{r}
+accuracy = sum(diag(tab)) / sum(tab)
+precision = tab[2,2] / sum(tab[,2])
+recall = tab[2,2] / sum(tab[2,])
+specificity = tab[1,1] / sum(tab[,1])
+
+accuracy
+```
+```{r}
+precision
+```
+```{r}
+recall
+```
+```{r}
+specificity
+```
+
+
+Provedimo procjenu parametara ponovno, ali ovaj put bez jezika, koji se nije pokazao kao statistički zanačajan:
+
+```{r}
+logreg.mdl = glm(awards ~ rating + genre1 + genre2 + pages + numRatings + price + likedPercent, data=goodreads_copy, family = binomial())
+summary(logreg.mdl)
+```
+```{r}
+Rsq = 1 - logreg.mdl$deviance/logreg.mdl$null.deviance
+Rsq
+```
+Vidimo da dobivamo manju vrijednost R^2, što je bolje, pogotovo s obzirom na to da koristimo manji broj atributa.
+
+```{r}
+yHat <- logreg.mdl$fitted.values >= 0.5
+
+tab <- table(goodreads_copy$awards, yHat)
+
+tab
+```
+
+## Predviđanje ocjene knjige
+
+Linearnom regresijom nastojimo pokazati vezu između regresora (nezavnisnih varijabli) i rekacije (zavisne varijable).
+U ovom dijelu pokušat ćemo predvidjeti ocjenu knjige na temelju dostupnih varijabli. Prvo moramo vizualizirati ocjene knjiga u ovisnosti o nekim odabranim varijablama. Uzimamo broj ocjena (popularnost knjige), likedPercent, broj stranica i cijenu te gledamo kako utječu na ocjenu knjige.
+
+```{r}
+plot(goodreads_copy$numRatings, goodreads_copy$rating)
+plot(goodreads_copy$likedPercent, goodreads_copy$rating)
+plot(goodreads_copy$pages, goodreads_copy$rating)
+plot(goodreads_copy$price, goodreads_copy$rating)
+```
+Od svih odabranih varijabli, likedPercent ima vizualno linearnu vezu s ocjenom knjige (što je veći likedPercent, to je veća ocjena knjige), što bi se i intuitivno dalo pretpostaviti. Provodimo linearnu regresiju s likedPercent kao regresorom.
+
+```{r}
+fit.likedPercent = lm(rating~likedPercent, data = goodreads_copy)
+summary(fit.likedPercent)
+plot(goodreads_copy$likedPercent, goodreads_copy$rating)
+lines(goodreads_copy$likedPercent, fit.likedPercent$fitted, col='red')
+```
+
+Sudeći po koeficijentu determinacije, model opisuje čvrstu linearnu vezu između ocjene i postotka, na što ukazuje i graf, no trebamo još provesti analizu reziduala.
+
+```{r}
+hist(fit.likedPercent$residuals)
+
+qqnorm(rstandard(fit.likedPercent))
+qqline(rstandard(fit.likedPercent))
+
+plot(fit.likedPercent$fitted.values, fit.likedPercent$residuals)
+```
+
+Q-Q plot pokazuje da distribucija reziduala u repovima odstupa od normalne, ali provesti ćemo još i Lillieforsov test normalnosti.
+
+```{r}
+library(nortest)
+lillie.test(rstandard(fit.likedPercent))
+```
+
+Test potvrđuje da nam reziduali nisu normalno distribuirani, što znači da su pretpostavke linearne regresije značajno narušene.
+
+Svejedno, probajmo koristiti kvadratnu funkciju umjesto pravca s likedPercent da vidimo možemo li poboljšati rezultat.
+
+```{r transformacija}
+
+# 
+fit.likedPercent.sq = lm(rating ~ likedPercent + I(likedPercent^2),data = goodreads_copy)
+summary(fit.likedPercent.sq)
+
+#jednostavan nacin za graficki prikazati nelinearne krivulje
+f = function(x, coeffs)
+  return(coeffs[[1]] + coeffs[[2]] * x + coeffs[[3]] * x^2)
+plot(goodreads_copy$likedPercent,goodreads_copy$rating) 
+curve(f(x, fit.likedPercent.sq$coefficients), add = TRUE, col = "red")
+
+```
+Vidimo da nam je vrijednost R^2 poboljšana u odnosu na kada smo koristili pravac i sada je obuhvaćeno više varijance.
+```{r}
+hist(fit.likedPercent.sq$residuals)
+
+qqnorm(rstandard(fit.likedPercent.sq))
+qqline(rstandard(fit.likedPercent.sq))
+
+plot(fit.likedPercent.sq$fitted.values, fit.likedPercent.sq$residuals)
+```
+I u ovom slučaju vidimo u Q-Q plotu da repovi odstupaju od normalne distribucije. Međutim, reziduali izgledaju puno bolje (nasumičnije) nego kada smo koristili pravac.
+```{r}
+lillie.test(rstandard(fit.likedPercent.sq))
+```
+Lilliefors test potvrđuje da nam ni ovdje reziduali nisu normalno distribuirani.
+
+## Ovisnost cijene o jeziku i broju stranica
+
+Osim ocjene, možemo provjeriti možemo li predvidjeti cijenu knjige na temelju regresora kao što su jezik, broj stranica, žanr. 
+
+```{r}
+fit = lm(price ~ language + pages + genre1 + genre2, data = goodreads_copy)
+summary(fit)
+```
+Možemo uočiti sljedeće:
+
+* Niti jedan jezik statistički značajno ne indicira višu cijenu, osim Filipinskog.
+* Broj stranica se čini kao pozitivno koreliran s cijenom.
+* Među žanrovima neki od njih su pozitvno korelirani s cijenom: poezija, horor, SF i kratke priče.
+Kada pogledamo koeficijent determinacije vidimo da je riječ o slaboj linearnoj ovisnosti, dok F-statistika ukazuje da je test značajan.
+
+Kako se jezik nije pokazao kao značajan prediktor, možemo samo provesti jednostavnu regresiju koristeći broj stranica kao prediktor, te dobivenu vezu možemo prikazati grafički:
+
+```{r}
+fit = lm(price ~ pages, data = goodreads_copy)
+summary(fit)
+
+plot(goodreads_copy$pages, goodreads_copy$price)
+lines(goodreads_copy$pages, fit$fitted.values, col='red')
+```
+
+Vidimo da broj stranica ipak nije dobar prediktor za cijenu. Nešto slično smo već pokazali i hi-kvadrat testom neovisnosti. Vrijednost R^2 također je pokazatelj da ovo nije dobar model i da je njime obuhvaćeno premalo varijance.
+Idemo sada probati napraviti regresiju koristeći broj stranica i žanr kao regresore.
+
+```{r}
+fit = lm(price ~ pages + genre1 + genre2, data = goodreads_copy)
+summary(fit)
+
+```
+
+Na temelju dobivenih vrijednosti vidimo da ni žanr u kombinaciji s brojem stranica nije dobar prediktor.
+
+## Analiza varijance i neparametarski testovi
+
+Želimo li usporediti sredine i medijane broja ljudi koji su dodijelili svaku od 5 mogućih ocjena knjigama, u svrhu provjeravanja dali korisnici stvarno ocjenjuju knjige uniformno, ne možemo koristiti iste testove za usporedbu kao ranije. S obzirom da sada imamo 5 uzoraka, po jedan za svaku od 5 mogućih ocjena, mogli bismo napraviti višestruko testiranje većim brojem T-testova. Međutim, to nije dobar pristup, jer nam se ovisno o odabranoj razini značajnosti povećava kumulativna vjerojatnost pogreške prvog tipa.
+
+ANOVA metoda omogućava nam istodobno testiranje hipoteza postoji li značajno odstupanje među sredinama svih 5 uzoraka pomoću dekompozicije varijabilnosti na varijabilnost sredina uzoraka među kumulativnom sredinom i na varijabilnost unutar uzoračkih grupa prema vlastitoj sredini.
+
+```{r}
+df <- read.csv("Goodreads-dataset-sanitized-arr.csv", header = TRUE, sep=",")
+head(df)
+```
+
+Prvo pretprocesiramo podatke s ciljem izdvajanja pojedinačnih brojeva ocjena zvjezdicama.
+
+```{r}
+library(stringr)
+library(purrr)
+x = nrow(df)
+for(i in 1:x){
+  ratings = str_split_fixed(gsub("\\[|'|\\]|,"," ",df$ratingsByStars[i]), "\\s+",6)[2:6]
+  ratings[5] = str_trim(ratings[5])
+  ratings = ratings %>%
+    map_int(function(x) strtoi(x))
+  
+  df$X1.star[i] = ratings[1]
+  df$X2.star[i] = ratings[2]
+  df$X3.star[i] = ratings[3]
+  df$X4.star[i] = ratings[4]
+  df$X5.star[i] = ratings[5]
+}
+write.csv(df,file="Goodreads-dataset-sanitized-second.csv",na = "")
+head(df)
+```
+
+Stupci X5.star,X4.star,...,X1.star prikazuju broj ljudi koji su knjizi dodijelili ocjenu 5,4,...,1. Kako bismo mogli analizirati ANOVA postupak, potrebno je provjeriti jesu li zadovoljene ANOVA pretpostavke homoskedastičnosti, normalnosti i nezavisnosti tih 5 populacija.
+
+Najprije prikazujemo broj korisnika koji je nekoj knjizi dodijelio određenu ocjenu kao postotak, s obzirom da sve knjige nisu jednako ocjenjivane.
+
+```{r}
+x = nrow(df)
+for(i in 1:x){
+  sum_retka = df$X1.star[i]+df$X2.star[i]+df$X3.star[i]+df$X4.star[i]+df$X5.star[i]
+  df$X1.star[i] = df$X1.star[i]/sum_retka
+  df$X2.star[i] = df$X2.star[i]/sum_retka
+  df$X3.star[i] = df$X3.star[i]/sum_retka
+  df$X4.star[i] = df$X4.star[i]/sum_retka
+  df$X5.star[i] = df$X5.star[i]/sum_retka
+}
+head(df)
+```
+
+Najprije provjeravamo normalnost uzorka, što je ključno za pretpostavke ANOVA-e. Normalnost možemo provjeriti:
+1) vizualno - što je dobro kada želimo samo naslutiti kakvog je distribucija oblika
+  -Q-Q plotom
+  -histogramom
+  
+2) konkretnim testovima
+  -Kolgomorov-Smirnovljevim testom
+  -Liliforsovom inačicom Kolgomorov-Smirnovljevog testa
+  
+Iz prikazanih histograma i Q-Q plotova vidimo kako je distribucija za neke ocjene aproksimativno normalna, ali za neke i jako zakrivljena. Treći moment tih distribucija izrazito je velik. Iako je ANOVA postupak relativno robustan na normalnost, ovdje ju nećemo koristiti iz opravdanih razloga. Bolji izbor je Kruskal-Wallisov test
+
+
+```{r}
+hist(df$X5.star, breaks=50)
+hist(df$X4.star, breaks=50)
+hist(df$X3.star, breaks=50)
+hist(df$X2.star, breaks=50)
+hist(df$X1.star, breaks=50)
+
+```
+
+
+```{r}
+qqnorm(df$X1.star)
+qqline(df$X1.star)
+qqnorm(df$X2.star)
+qqline(df$X2.star)
+qqnorm(df$X3.star)
+qqline(df$X3.star)
+qqnorm(df$X4.star)
+qqline(df$X4.star)
+qqnorm(df$X5.star)
+qqline(df$X5.star)
+```
+
+
+```{r}
+require(nortest)
+lillie.test(df$X1.star)
+lillie.test(df$X2.star)
+lillie.test(df$X3.star)
+lillie.test(df$X4.star)
+lillie.test(df$X5.star)
+
+```
+Što se tiče homogenosti varijanci, njihovu jednakost mogli bi provjeriti Bartlettovim testom, ali podatci o ocjenama definitivno nisu normalno distribuirani. Možemo pokušati sa logaritamskom transformacijom podataka
+
+ZAKLJUČAK: Normalnost možemo pokušati postići logaritamskom transformacijom podataka
+
+```{r}
+df <- read.csv("Goodreads-dataset-sanitized-second.csv", header = TRUE, sep=",")
+```
+Provodimo transformaciju podataka, ali postoji nekoliko problematičnih vrijednosti nula čiji je logaritam - beskonačno, stoga te vrijednosti izbacujemo iz skupa podataka
+
+```{r}
+df = df[!(df$X1.star==0 | df$X2.star==0 |df$X3.star==0 |df$X4.star==0 |df$X5.star==0),]
+df = df[!is.na(df$X1.star),]
+df = df[!is.na(df$X2.star),]
+df = df[!is.na(df$X3.star),]
+df = df[!is.na(df$X4.star),]
+df = df[!is.na(df$X5.star),]
+x = nrow(df)
+for(i in 1:x){
+  df$X1.star[i] = log(df$X1.star[i])
+  df$X2.star[i] = log(df$X2.star[i])
+  df$X3.star[i] = log(df$X3.star[i])
+  df$X4.star[i] = log(df$X4.star[i])
+  df$X5.star[i] = log(df$X5.star[i])
+}
+head(df)
+```
+
+```{r}
+hist(df$X5.star, breaks=50)
+hist(df$X4.star, breaks=50)
+hist(df$X3.star, breaks=50)
+hist(df$X2.star, breaks=50)
+hist(df$X1.star, breaks=50)
+```
+
+
+```{r}
+qqnorm(df$X1.star)
+qqline(df$X1.star)
+qqnorm(df$X2.star)
+qqline(df$X2.star)
+qqnorm(df$X3.star)
+qqline(df$X3.star)
+qqnorm(df$X4.star)
+qqline(df$X4.star)
+qqnorm(df$X5.star)
+qqline(df$X5.star)
+```
+
+```{r}
+boxplot(df$X1.star, df$X2.star,df$X3.star,df$X4.star,df$X5.star,names=c("1 star rating","2 star rating","3 star rating","4 star rating","5 star rating"))
+```
+
+Boxplot sugerira da bi mogla postojati statistički značajna razlika među sredinama. Provodimo ANOVA postupak, jer je on robustan na normalnost
+
+
+```{r}
+require(nortest)
+lillie.test(df$X1.star)
+lillie.test(df$X2.star)
+lillie.test(df$X3.star)
+lillie.test(df$X4.star)
+lillie.test(df$X5.star)
+
+```
+Dobivamo malene P-vrijednosti, s obzirom na to da je u skupu podataka velik broj uzoraka.
+
+ANOVA:
+
+```{r}
+aov(X4.star~X1.star+X2.star, data=df)
+```
+
+Prethodni dio bavio se ANOVA testom. ANOVA je parametarski test koji prepostavlja homoskedastičnost
+(homogenost varijanci svih grupa) i normalnost reziduala.
+
+Naslućujemo da je u ovom slučaju bolje koristiti njezinu neparametarsku alternativu - Kruskal-Wallisov test. Nedostatak korištenja neparametarskih testova je manja snaga testa.
+
+Kruskal-Walisov test postavljen je na sljedeći način:
+H0 (nulta hipoteza) - medijani distribucija svih uzoraka su jednaki
+H1 (alternativna hipoteza) - barem 2 medijana nisu jednaka
+
+
+
+```{r}
+df <- read.csv("Goodreads-dataset-sanitized-second.csv", header = TRUE, sep=",")
+```
+
+
+```{r}
+x1 <- df$X1.star
+x2 <- df$X2.star
+x3 <- df$X3.star
+x4 <- df$X4.star
+x5 <- df$X5.star
+result <- append(x1, x2)
+result <- append(result, x3)
+result <- append(result, x4)
+result <- append(result, x5)
+length(result)
+```
+
+```{r}
+grx1 = rep(c("X1.star"),times=length(result)/5)
+grx2 = rep(c("X2.star"),times=length(result)/5)
+grx3 = rep(c("X3.star"),times=length(result)/5)
+grx4 = rep(c("X4.star"),times=length(result)/5)
+grx5 = rep(c("X5.star"),times=length(result)/5)
+groups <- append(grx1, grx2)
+groups <- append(groups, grx3)
+groups <- append(groups, grx4)
+groups <- append(groups, grx5)
+length(groups)
+```
+
+```{r}
+ranked_grades <- result
+groups <- groups
+
+data <- data.frame(ranked_grades, groups)
+head(data)
+```
+
+```{r}
+kruskal.test(ranked_grades ~ groups,data = data)
+```
+
+Stoga, zbog malene p-vrijednosti odbacujemo hipotezu H0 o jednakosti medijana i prihvaćamo hipotezu i da barem 2 medijana nisu jednaka. Za razliku od ANOVA-e, ovaj test je bolji za podatke koje imamo, jer ne zahtjeva pretpostavku normalnosti uzoraka. Snaga testa je zato manja, ali s obzirom da je p-vrijednost vrlo mala, možemo biti sigurni u ispravnost odluke.
+
